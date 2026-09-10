@@ -4,7 +4,7 @@ A working diagnostic tester ↔ ECU simulation in Python, implementing
 real UDS request/response framing, session state, and a security
 access seed/key handshake.
 
-## The simple version
+## Breaking it down in a simple version:
 
 Imagine your car's ECU is a strict security guard: wrong session, guard
 won't discuss sensitive topics. Right session but no ID shown yet, guard
@@ -46,6 +46,11 @@ real manufacturers use proprietary, much harder-to-reverse math here.
 ```bash
 python3 test_uds.py
 ```
+## Output:
+<img width="675" height="579" alt="Screenshot (40)" src="https://github.com/user-attachments/assets/9f49a44f-9adf-4128-8801-3efe5314b261" />
+
+<img width="634" height="620" alt="Screenshot (41)" src="https://github.com/user-attachments/assets/293abca8-cba8-492c-9b39-b0f6d6bfa2c4" />
+
 
 ## What I'd add next
 
