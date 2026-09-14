@@ -16,7 +16,7 @@ random seed), you're trusted for the rest of the visit.
 ## Why the seed/key handshake matters
 
 The seed changes every session, so recording an old successful
-handshake and replaying it later won't work — the old key doesn't
+handshake and replaying it later won't work cause the old key doesn't
 match the new seed. This project uses a simplified stand-in algorithm;
 real manufacturers use proprietary, much harder-to-reverse math here.
 
