@@ -54,6 +54,52 @@ python3 test_uds.py
 
 ## What I'd add next
 
-- Real CAN transport (python-can + vcan0) instead of TCP
+- Real CAN transport (python-can + vcan0) instead of TCP (DONE, UPDATED)
 - 0x34/0x36/0x37 (OTA firmware update flow)
 - Interactive CLI for the tester
+
+# CAN Bus + ISO-TP Transport Layer (ISO 15765-2)
+
+An upgrade to the UDS Protocol Simulator: real CAN-frame-level
+transport with ISO-TP segmentation and reassembly, replacing the
+original plain-TCP transport. UDS messages longer than 7 bytes are now
+genuinely split across multiple 8-byte CAN frames and reassembled, including a real, two-directional Flow Control handshake instead of being sent as one arbitrarily-sized chunk over a socket.
+This uses `python-can`'s **virtual** bus backend, not real SocketCAN
+(`vcan0`). Real SocketCAN needs a Linux kernel module and a privileged
+container, which is currently not available. The virtual backend is a real
+`python-can` feature (used in python-can's own test suite) that is the same
+`can.Message` objects, the same API, and the same ISO-TP logic sitting on top of
+it. Switching to real hardware or SocketCAN later is a **updating the code to** (`interface="socketcan", channel="vcan0"` instead of `interface="virtual"`)
+
+## Files
+
+| File | What it does |
+|---|---|
+| `iso_tp.py` | Pure ISO-TP framing logic: Single/First/Consecutive/Flow-Control frame encode & decode, no networking |
+| `can_transport.py` | Wraps `python-can`, sends/receives full UDS messages, handling ISO-TP segmentation transparently |
+| `test_can_transport.py` | 4 pure-logic tests + 1 real two-instance CAN bus transfer test |
+
+## The 4 frame types (ISO 15765-2)
+
+| Frame | Purpose |
+|---|---|
+| Single Frame (SF) | Whole message fits in ≤7 bytes: sent as-is |
+| First Frame (FF) | Message too big: announces total length, carries first 6 bytes |
+| Consecutive Frame (CF) | Carries the next 7 bytes, numbered 0-15 (wraps) so dropped or reordered frames are detectable |
+| Flow Control (FC) | Sent by the **receiver** back to the sender: "continue," "wait," or "abort," plus pacing controls |
+
+## What's verified: 
+
+- 20-byte message correctly splits into exactly 3 frames (1 FF + 2 CF) and reassembles byte-for-byte
+- An out-of-order Consecutive Frame is correctly detected and rejected
+- A real 25-byte message sent between two independent `CanUdsTransport` instances (genuinely separate objects, communicating only via the virtual CAN bus, not by sharing memory), including the ECU side correctly sending back a real Flow Control frame before the sender continues.
+- ## How to run it
+
+```bash
+pip install python-can
+python3 test_can_transport.py
+```
+
+An upgrade to the UDS Protocol Simulator: real CAN-frame-level
+transport with ISO-TP segmentation and reassembly, replacing the
+original plain-TCP transport.
