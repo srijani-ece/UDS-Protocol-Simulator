@@ -98,10 +98,7 @@ python3 test_can_transport.py
 ```
 ## Output:
 <img width="975" height="460" alt="uds_ps_test_can_transportpy" src="https://github.com/user-attachments/assets/8828c93a-4d48-4576-b20d-297020ac2a26" />
-An upgrade to the UDS Protocol Simulator: real CAN-frame-level
+
 ## Wire CAN Transport into ECU Simulator (output):
 <img width="819" height="460" alt="UDS_3RD_UPDATEa" src="https://github.com/user-attachments/assets/6cd36f38-8dd7-41ca-b8f3-fb32006f1a4a" />
 <img width="942" height="527" alt="UDS_3RD_UPDATEb" src="https://github.com/user-attachments/assets/4244004e-c956-4f1e-8b12-cfae971d0c07" />
-
-transport with ISO-TP segmentation and reassembly, replacing the
-original plain-TCP transport.
