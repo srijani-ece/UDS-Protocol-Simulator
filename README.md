@@ -99,6 +99,8 @@ it. Switching to real hardware or SocketCAN later is a **updating the code to** 
 pip install python-can
 python3 test_can_transport.py
 ```
+## Output:
+<img width="975" height="460" alt="uds_ps_test_can_transportpy" src="https://github.com/user-attachments/assets/8828c93a-4d48-4576-b20d-297020ac2a26" />
 
 An upgrade to the UDS Protocol Simulator: real CAN-frame-level
 transport with ISO-TP segmentation and reassembly, replacing the
