@@ -156,12 +156,6 @@ This exercises the diagnostic session over the CAN transport, including session 
 <img width="819" height="488" alt="UDSCLEAN2" src="https://github.com/user-attachments/assets/09898a28-8c92-4245-8f45-555cf97efb5f" />
 <img width="819" height="460" alt="UDSCLEAN3" src="https://github.com/user-attachments/assets/50518f2b-afdc-44b1-9909-f6c5cb1090be" />
 
-### Architecture
-*Multi-frame flow control and STmin implementation:*
-<img width="819" height="634" alt="uds_architecture" src="https://github.com/user-attachments/assets/9e568079-c1ff-465d-bfab-4e0f28da061f" />
-<img width="819" height="628" alt="uds_architecture2" src="https://github.com/user-attachments/assets/19207f09-be6c-4a36-9006-f9950d49aaa0" />
-<img width="819" height="460" alt="uds_stmin" src="https://github.com/user-attachments/assets/ddb622de-32e5-4948-a94e-83909f8e8bda" />
-
 ## What I'd add next
 
 * `0x34 / 0x36 / 0x37` — UDS Request Download / Transfer Data / Request Transfer Exit for an OTA-style firmware update flow.
