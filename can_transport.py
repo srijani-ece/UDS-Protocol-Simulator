@@ -23,7 +23,7 @@ from iso_tp import (
 
 DEFAULT_TESTER_ID = 0x7E0  # standard-ish diagnostic request arbitration ID
 DEFAULT_ECU_ID    = 0x7E8  # standard-ish diagnostic response arbitration ID
-
+MAX_FC_WAIT_FRAMES = 3
 
 class CanUdsTransport:
     """
@@ -55,6 +55,7 @@ class CanUdsTransport:
 
         consecutive_frames = frames[1:]
         sent = 0
+        fc_wait_count = 0
 
         # Real ISO-TP Flow Control governs pacing with TWO numbers, not
         # one: Block Size (how many CFs to send before requiring another
@@ -73,14 +74,22 @@ class CanUdsTransport:
             st_min_seconds = self._decode_st_min(fc[2])
 
             if flow_status == FC_WAIT:
-                # Receiver isn't ready yet — go around again and wait
-                # for another FC rather than sending anything.
+                fc_wait_count += 1
+
+                if fc_wait_count > MAX_FC_WAIT_FRAMES:
+                    raise TimeoutError(
+                        f"Receiver sent too many consecutive Flow Control WAIT "
+                        f"frames ({fc_wait_count})"
+                    )
+
+                # Receiver isn't ready yet - wait for another FC.
                 continue
             if flow_status != FC_CONTINUE:
                 raise RuntimeError(
                     f"Receiver aborted the transfer (Flow Control status "
                     f"{flow_status:#x}, e.g. OVERFLOW)"
                 )
+            fc_wait_count = 0
 
             # block_size == 0 means "no limit, send everything remaining"
             batch_size = len(consecutive_frames) - sent if block_size == 0 else block_size
@@ -110,10 +119,9 @@ class CanUdsTransport:
             microseconds = (raw - 0xF0) * 100
             return microseconds / 1_000_000.0
         else:
-            # Reserved/invalid value per spec — don't guess, don't stall
-            # forever either; treat as "no additional delay" and let the
-            # caller's own timeout be the real safety net.
-            return 0.0
+            raise ValueError(
+                f"Invalid/reserved ISO-TP STmin value: {raw:#04x}"
+            )
 
     def receive_uds_message(self, fc_block_size: int = 0, fc_st_min: int = 0) -> bytes:
         """

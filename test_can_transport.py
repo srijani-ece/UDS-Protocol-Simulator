@@ -182,6 +182,47 @@ def test_malformed_empty_frame_rejected():
         assert "Empty" in str(e)
     print("PASS: empty/malformed CAN frame correctly rejected instead of crashing")
 
+def test_malformed_first_frame_rejected():
+    """Rejects a First Frame that is shorter than the required 8-byte CAN frame."""
+    receiver = IsoTpReceiver()
+
+    malformed_ff = bytes([0x10, 0x08, 0xAA, 0xBB])
+
+    try:
+        receiver.receive_frame(malformed_ff)
+        assert False, "should have rejected a malformed First Frame"
+    except ValueError as e:
+        assert "Malformed First Frame" in str(e)
+
+    print("PASS: malformed First Frame correctly rejected")
+
+def test_invalid_st_min_rejected():
+    """Rejects reserved ISO-TP STmin values instead of silently treating them as zero."""
+    try:
+        CanUdsTransport._decode_st_min(0x80)
+        assert False, "should have rejected reserved STmin value"
+    except ValueError as e:
+        assert "Invalid/reserved ISO-TP STmin" in str(e)
+
+    print("PASS: reserved ISO-TP STmin correctly rejected")
+
+def test_repeated_fc_wait_is_bounded():
+    """Rejects an indefinitely waiting receiver after the configured limit."""
+    transport = CanUdsTransport.__new__(CanUdsTransport)
+    transport._send_can_frame = lambda data: None
+
+    wait_frame = bytes([0x31, 0x00, 0x00])  # FC WAIT, BS=0, STmin=0
+    transport._receive_can_frame = lambda: wait_frame
+
+    payload = bytes(range(20))
+
+    try:
+        transport.send_uds_message(payload)
+        assert False, "should have rejected repeated FC WAIT frames"
+    except TimeoutError as e:
+        assert "too many consecutive Flow Control WAIT" in str(e)
+
+    print("PASS: repeated Flow Control WAIT correctly bounded")
 
 if __name__ == "__main__":
     test_single_frame_roundtrip()
@@ -192,4 +233,7 @@ if __name__ == "__main__":
     test_flow_control_block_size_actually_enforced()
     test_payload_over_4095_bytes_rejected()
     test_malformed_empty_frame_rejected()
+    test_malformed_first_frame_rejected()
+    test_invalid_st_min_rejected()
+    test_repeated_fc_wait_is_bounded()
     print("\nALL TESTS PASSED")

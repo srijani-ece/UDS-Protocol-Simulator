@@ -143,11 +143,23 @@ class IsoTpReceiver:
             return bytes(frame[1:1 + length])
 
         elif frame_type == FRAME_TYPE_FF:
+            if len(frame) < 8:
+                raise ValueError(
+                    f"Malformed First Frame: expected 8 bytes, got {len(frame)}"
+                )
+
             self._expected_length = ((frame[0] & 0x0F) << 8) | frame[1]
+
+            if self._expected_length < 7:
+                raise ValueError(
+                    f"Malformed First Frame: invalid payload length "
+                    f"{self._expected_length}"
+                )
+
             self._buffer = bytearray(frame[2:8])
             self._next_seq = 1
             self._receiving = True
-            return None  # not complete yet — caller should now send a Flow Control frame
+            return None
 
         elif frame_type == FRAME_TYPE_CF:
             if not self._receiving:
