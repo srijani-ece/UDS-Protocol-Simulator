@@ -150,13 +150,18 @@ This exercises the diagnostic session over the CAN transport, including session 
 
 ### CAN transport tests
 
-<img width="975" height="460" alt="CAN transport test output" src="https://github.com/user-attachments/assets/8828c93a-4d48-4576-b20d-297020ac2a26" />
+<img width="819" height="460" alt="UDSCLEAN1" src="https://github.com/user-attachments/assets/3469cdb3-b4b9-4f0b-ae9e-1895b610b2da" />
 
 ### UDS over CAN
+<img width="819" height="488" alt="UDSCLEAN2" src="https://github.com/user-attachments/assets/09898a28-8c92-4245-8f45-555cf97efb5f" />
+<img width="819" height="460" alt="UDSCLEAN3" src="https://github.com/user-attachments/assets/50518f2b-afdc-44b1-9909-f6c5cb1090be" />
 
-<img width="819" height="460" alt="UDS over CAN output" src="https://github.com/user-attachments/assets/6cd36f38-8dd7-41ca-b8f3-fb32006f1a4a" />
-
-<img width="942" height="527" alt="UDS over CAN output" src="https://github.com/user-attachments/assets/4244004e-c956-4f1e-8b12-cfae971d0c07" />
+### Architecture
+*Multi-frame flow control implementation:* 
+<img width="819" height="634" alt="uds_architecture" src="https://github.com/user-attachments/assets/9e568079-c1ff-465d-bfab-4e0f28da061f" />
+<img width="819" height="628" alt="uds_architecture2" src="https://github.com/user-attachments/assets/19207f09-be6c-4a36-9006-f9950d49aaa0" />
+*ISO-TP STmin encoding ranges and reserved values:*
+<img width="819" height="460" alt="uds_stmin" src="https://github.com/user-attachments/assets/ddb622de-32e5-4948-a94e-83909f8e8bda" />
 
 ## What I'd add next
 
