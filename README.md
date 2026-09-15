@@ -57,7 +57,7 @@ python3 test_uds.py
 
 ## What I'd add next
 
-- - ~~Real CAN transport (python-can + vcan0) instead of TCP~~ **Done**, see `iso_tp.y` / `can_transport.py` / `test_can_transport.py` 
+- - ~~Real CAN transport (python-can + vcan0) instead of TCP~~ **Done**, see `iso_tp.py` / `can_transport.py` / `test_can_transport.py` 
 - 0x34/0x36/0x37 (OTA firmware update flow)
 - Interactive CLI for the tester
 - - ~~Wire this into `ecu_simulator.py` / `tester.py`~~ — **Done**, see `ecu_can.py` / `tester_can.py` / `test_uds_over_can.py`. `handle_request()` (the actual UDS logic) needed zero changes.
