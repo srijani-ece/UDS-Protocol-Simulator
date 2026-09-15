@@ -104,10 +104,92 @@ def test_real_can_multi_frame_transfer():
           f"correctly split, Flow-Control-negotiated, and reassembled on the ECU side")
 
 
+def test_flow_control_block_size_actually_enforced():
+    """
+    This is the test that proves fix #2: not just that a Block Size
+    number can be encoded into a Flow Control frame (already covered
+    by test_flow_control_frame_format), but that the SENDER genuinely
+    pauses and waits for a fresh Flow Control frame after each block,
+    instead of blasting every Consecutive Frame through on the first
+    'go ahead'.
+    """
+    channel = "test-channel-blocksize"
+
+    # 41 bytes -> First Frame carries 6, leaving exactly 35 bytes ->
+    # exactly 5 Consecutive Frames (35 / 7). With block_size=2, that's
+    # 3 blocks (2, 2, 1) -> receiver must send 3 separate Flow Control
+    # frames total (one to start, one after each full block of 2).
+    payload = bytes(range(41))
+
+    received_holder = {}
+    fc_frames_sent_by_receiver = {"count": 0}
+
+    def ecu_side():
+        ecu_transport = CanUdsTransport(channel, tx_id=DEFAULT_ECU_ID, rx_id=DEFAULT_TESTER_ID)
+
+        # Wrap _send_can_frame so we can count how many Flow Control
+        # frames the receiver actually sends, without changing its
+        # real behavior at all.
+        original_send = ecu_transport._send_can_frame
+        def counting_send(data):
+            if (data[0] >> 4) == 0x3:  # Flow Control frame type
+                fc_frames_sent_by_receiver["count"] += 1
+            original_send(data)
+        ecu_transport._send_can_frame = counting_send
+
+        received_holder["data"] = ecu_transport.receive_uds_message(fc_block_size=2, fc_st_min=0)
+        ecu_transport.close()
+
+    ecu_thread = threading.Thread(target=ecu_side, daemon=True)
+    ecu_thread.start()
+    time.sleep(0.2)
+
+    tester_transport = CanUdsTransport(channel, tx_id=DEFAULT_TESTER_ID, rx_id=DEFAULT_ECU_ID)
+    tester_transport.send_uds_message(payload)
+    tester_transport.close()
+
+    ecu_thread.join(timeout=3.0)
+
+    assert received_holder.get("data") == payload, "Reassembled message doesn't match original"
+    assert fc_frames_sent_by_receiver["count"] == 3, (
+        f"Expected exactly 3 Flow Control round-trips for 5 CFs at "
+        f"block_size=2 (2+2+1), but got {fc_frames_sent_by_receiver['count']} — "
+        f"the sender is not actually respecting Block Size."
+    )
+    print(f"PASS: Block Size=2 genuinely enforced — sender paused for "
+          f"{fc_frames_sent_by_receiver['count']} separate Flow Control "
+          f"round-trips across 5 Consecutive Frames, not sent as one burst")
+
+
+def test_payload_over_4095_bytes_rejected():
+    """Proves fix #1: the 12-bit First Frame length limit is now enforced."""
+    too_big = bytes(4096)
+    try:
+        build_frames(too_big)
+        assert False, "should have rejected a payload over 4095 bytes"
+    except ValueError as e:
+        assert "4095" in str(e)
+    print("PASS: payload exceeding ISO-TP's 4095-byte limit correctly rejected")
+
+
+def test_malformed_empty_frame_rejected():
+    """Proves fix #11: defensive validation on malformed frames."""
+    receiver = IsoTpReceiver()
+    try:
+        receiver.receive_frame(b"")
+        assert False, "should have rejected an empty frame"
+    except ValueError as e:
+        assert "Empty" in str(e)
+    print("PASS: empty/malformed CAN frame correctly rejected instead of crashing")
+
+
 if __name__ == "__main__":
     test_single_frame_roundtrip()
     test_multi_frame_roundtrip()
     test_sequence_error_detected()
     test_flow_control_frame_format()
     test_real_can_multi_frame_transfer()
+    test_flow_control_block_size_actually_enforced()
+    test_payload_over_4095_bytes_rejected()
+    test_malformed_empty_frame_rejected()
     print("\nALL TESTS PASSED")

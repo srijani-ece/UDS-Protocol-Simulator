@@ -1,6 +1,7 @@
 import time
 from can_transport import CanUdsTransport, DEFAULT_TESTER_ID, DEFAULT_ECU_ID
-from uds_common import ECUState, handle_request, frame_to_hex
+from ecu_simulator import ECUState, handle_request
+from uds_common import frame_to_hex
 
 def run_can_ecu(channel="uds-can-bus"):
     state = ECUState()

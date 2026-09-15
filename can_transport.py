@@ -18,7 +18,7 @@ import time
 
 from iso_tp import (
     build_frames, build_flow_control_frame, IsoTpReceiver,
-    FRAME_TYPE_FC, FC_CONTINUE,
+    FRAME_TYPE_FC, FC_CONTINUE, FC_WAIT,
 )
 
 DEFAULT_TESTER_ID = 0x7E0  # standard-ish diagnostic request arbitration ID
@@ -50,29 +50,81 @@ class CanUdsTransport:
             return
 
         # Multi-frame: send First Frame, then WAIT for the receiver's
-        # Flow Control response before sending the Consecutive Frames —
-        # this is the real two-directional handshake most simplified
-        # ISO-TP examples skip entirely.
+        # Flow Control response before sending ANY Consecutive Frames.
         self._send_can_frame(frames[0])
 
-        fc = self._receive_can_frame()
-        if fc is None or (fc[0] >> 4) != FRAME_TYPE_FC:
-            raise TimeoutError("Expected Flow Control frame, got none or wrong type")
-        flow_status = fc[0] & 0x0F
-        st_min_ms = fc[2]
-        if flow_status != FC_CONTINUE:
-            raise RuntimeError(f"Receiver signaled non-continue Flow Control status: {flow_status}")
+        consecutive_frames = frames[1:]
+        sent = 0
 
-        for cf in frames[1:]:
-            self._send_can_frame(cf)
-            if st_min_ms > 0:
-                time.sleep(st_min_ms / 1000.0)
+        # Real ISO-TP Flow Control governs pacing with TWO numbers, not
+        # one: Block Size (how many CFs to send before requiring another
+        # FC) and STmin (minimum gap between individual CFs). A receiver
+        # can legitimately say "send me 8, then check in with me again"
+        # — ignoring Block Size and blasting every CF after a single FC
+        # defeats the actual purpose of flow control (letting a slow
+        # receiver throttle a fast sender).
+        while sent < len(consecutive_frames):
+            fc = self._receive_can_frame()
+            if fc is None or (fc[0] >> 4) != FRAME_TYPE_FC:
+                raise TimeoutError("Expected Flow Control frame, got none or wrong type")
 
-    def receive_uds_message(self) -> bytes:
+            flow_status = fc[0] & 0x0F
+            block_size = fc[1]
+            st_min_seconds = self._decode_st_min(fc[2])
+
+            if flow_status == FC_WAIT:
+                # Receiver isn't ready yet — go around again and wait
+                # for another FC rather than sending anything.
+                continue
+            if flow_status != FC_CONTINUE:
+                raise RuntimeError(
+                    f"Receiver aborted the transfer (Flow Control status "
+                    f"{flow_status:#x}, e.g. OVERFLOW)"
+                )
+
+            # block_size == 0 means "no limit, send everything remaining"
+            batch_size = len(consecutive_frames) - sent if block_size == 0 else block_size
+
+            for cf in consecutive_frames[sent:sent + batch_size]:
+                self._send_can_frame(cf)
+                if st_min_seconds > 0:
+                    time.sleep(st_min_seconds)
+            sent += batch_size
+
+    @staticmethod
+    def _decode_st_min(raw: int) -> float:
+        """
+        ISO-TP's STmin byte isn't a single linear scale — it's two
+        separate encoded ranges sharing one byte:
+          0x00-0x7F -> 0-127 milliseconds, directly
+          0xF1-0xF9 -> 100-900 MICROseconds (sub-millisecond timing)
+          0x80-0xF0 and 0xFA-0xFF -> reserved/invalid by spec
+
+        Treating the whole byte as "milliseconds" (a common shortcut in
+        simplified ISO-TP examples) silently misinterprets any
+        sub-millisecond request by roughly 1000x.
+        """
+        if 0x00 <= raw <= 0x7F:
+            return raw / 1000.0
+        elif 0xF1 <= raw <= 0xF9:
+            microseconds = (raw - 0xF0) * 100
+            return microseconds / 1_000_000.0
+        else:
+            # Reserved/invalid value per spec — don't guess, don't stall
+            # forever either; treat as "no additional delay" and let the
+            # caller's own timeout be the real safety net.
+            return 0.0
+
+    def receive_uds_message(self, fc_block_size: int = 0, fc_st_min: int = 0) -> bytes:
         """
         Receives a full UDS message, automatically sending a Flow
         Control frame if the incoming message turns out to be
         multi-frame, and reassembling all Consecutive Frames.
+
+        fc_block_size / fc_st_min let a caller simulate a genuinely
+        resource-constrained receiver (default 0/0 = "send everything,
+        no pacing needed" — fine for this simulation's ECU, but real
+        hardware often isn't that generous).
         """
         receiver = IsoTpReceiver()
 
@@ -84,23 +136,45 @@ class CanUdsTransport:
             result = receiver.receive_frame(frame)
 
             if (frame[0] >> 4) == 0x1:  # just processed a First Frame
-                # Tell the sender to go ahead: block_size=0 (no limit),
-                # st_min=0 (no minimum delay needed) — we're not a
-                # resource-constrained receiver in this simulation.
-                self._send_can_frame(build_flow_control_frame(FC_CONTINUE, 0, 0))
+                self._send_can_frame(
+                    build_flow_control_frame(FC_CONTINUE, fc_block_size, fc_st_min)
+                )
 
             if result is not None:
                 return result
+            elif (frame[0] >> 4) == 0x2 and fc_block_size > 0:
+                # Just consumed one Consecutive Frame and a real block
+                # size is in effect — track how many CFs we've allowed
+                # through this block, and issue another Flow Control
+                # once the block is exhausted.
+                self._cf_count_in_block = getattr(self, "_cf_count_in_block", 0) + 1
+                if self._cf_count_in_block >= fc_block_size:
+                    self._cf_count_in_block = 0
+                    self._send_can_frame(
+                        build_flow_control_frame(FC_CONTINUE, fc_block_size, fc_st_min)
+                    )
 
     def _send_can_frame(self, data: bytes):
         msg = can.Message(arbitration_id=self.tx_id, data=data, is_extended_id=False)
         self.bus.send(msg)
 
     def _receive_can_frame(self) -> bytes | None:
-        msg = self.bus.recv(timeout=self.timeout)
-        if msg is None or msg.arbitration_id != self.rx_id:
-            return None
-        return bytes(msg.data)
+        # On a real shared CAN bus, other nodes' traffic arrives
+        # interleaved with ours. Treating the FIRST frame that doesn't
+        # match our expected ID as "nothing arrived" is wrong — it
+        # should be ignored, not mistaken for a timeout, as long as we
+        # still have time left to wait for the real one.
+        deadline = time.monotonic() + self.timeout
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return None
+            msg = self.bus.recv(timeout=remaining)
+            if msg is None:
+                return None
+            if msg.arbitration_id == self.rx_id:
+                return bytes(msg.data)
+            # else: not our frame — loop again with whatever time's left
 
     def close(self):
         self.bus.shutdown()

@@ -53,6 +53,19 @@ def build_frames(payload: bytes) -> list[bytes]:
     """
     length = len(payload)
 
+    # The First Frame length field is only 12 bits (4 bits in byte0's
+    # low nibble + all 8 bits of byte1) — so 4095 bytes is the real,
+    # architectural ceiling for classical (non-CAN-FD) ISO-TP with
+    # normal addressing. Silently truncating a longer payload would
+    # make the receiver reconstruct the wrong length — a real
+    # correctness bug, not a style nitpick.
+    if length > 4095:
+        raise ValueError(
+            f"Payload of {length} bytes exceeds ISO-TP's 12-bit First "
+            f"Frame length limit (4095 bytes for classical CAN, normal "
+            f"addressing)."
+        )
+
     if length <= 7:
         # Single Frame: byte0 = [0x0][length in low nibble], then data
         frame = bytes([FRAME_TYPE_SF << 4 | length]) + payload
@@ -110,10 +123,23 @@ class IsoTpReceiver:
     _receiving: bool = False
 
     def receive_frame(self, frame: bytes) -> bytes | None:
+        if not frame:
+            raise ValueError("Empty CAN frame passed to ISO-TP receiver")
+        if len(frame) < 2:
+            raise ValueError(
+                f"Malformed ISO-TP frame: only {len(frame)} byte(s), "
+                f"need at least 2 (frame-type/length header)"
+            )
+
         frame_type = frame[0] >> 4
 
         if frame_type == FRAME_TYPE_SF:
             length = frame[0] & 0x0F
+            if length > len(frame) - 1:
+                raise ValueError(
+                    f"Malformed Single Frame: claims {length} bytes of "
+                    f"payload but only {len(frame) - 1} bytes present"
+                )
             return bytes(frame[1:1 + length])
 
         elif frame_type == FRAME_TYPE_FF:
@@ -148,3 +174,4 @@ class IsoTpReceiver:
 
         else:
             raise ValueError(f"Unknown ISO-TP frame type: {frame_type:#x}")
+            

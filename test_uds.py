@@ -10,6 +10,7 @@ from uds_common import (
     SID_READ_DATA_BY_IDENTIFIER, SID_WRITE_DATA_BY_IDENTIFIER,
     NEGATIVE_RESPONSE_SID, NRC_SECURITY_ACCESS_DENIED, NRC_INVALID_KEY,
     NRC_SUBFUNCTION_NOT_SUPPORTED, NRC_REQUEST_OUT_OF_RANGE,
+    NRC_REQUEST_SEQUENCE_ERROR,
     SESSION_EXTENDED, SESSION_DEFAULT, DID_VEHICLE_SPEED,
 )
 from ecu_simulator import ECUState, handle_request, compute_expected_key, serve
@@ -67,6 +68,23 @@ def test_security_access_correct_key_unlocks():
     print("PASS: correct security key unlocks the ECU")
 
 
+def test_security_access_key_without_seed_rejected():
+    """
+    Proves the fix: sending a key WITHOUT ever requesting a seed first
+    is a protocol sequencing violation (NRC 0x24, requestSequenceError)
+    — a different, more precise failure than "wrong key" (0x35) or a
+    generic out-of-range (0x31). A real diagnostic tool's retry logic
+    branches differently depending on which NRC it gets back.
+    """
+    state = ECUState()
+    state.session = SESSION_EXTENDED
+    # Never called subfn 0x01 (request seed) — pending_seed is still None
+    resp = handle_request(state, bytes([SID_SECURITY_ACCESS, 0x02, 0x00, 0x00]))
+    assert resp[0] == NEGATIVE_RESPONSE_SID
+    assert resp[2] == NRC_REQUEST_SEQUENCE_ERROR
+    print("PASS: sendKey without a prior requestSeed correctly rejected with requestSequenceError")
+
+
 def test_read_unsupported_did_out_of_range():
     state = ECUState()
     resp = handle_request(state, bytes([SID_READ_DATA_BY_IDENTIFIER, 0x99, 0x99]))
@@ -115,6 +133,7 @@ if __name__ == "__main__":
     test_write_without_security_denied()
     test_security_access_wrong_key_rejected()
     test_security_access_correct_key_unlocks()
+    test_security_access_key_without_seed_rejected()
     test_read_unsupported_did_out_of_range()
     test_end_to_end_full_session()
     print("\nALL TESTS PASSED")

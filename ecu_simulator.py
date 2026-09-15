@@ -5,7 +5,7 @@ socket (standing in for the real bus) and responds like a real ECU would.
 
 import socket
 import struct
-import random
+import secrets
 
 from uds_common import (
     SID_DIAGNOSTIC_SESSION_CONTROL, SID_ECU_RESET, SID_SECURITY_ACCESS,
@@ -14,6 +14,7 @@ from uds_common import (
     POSITIVE_RESPONSE_OFFSET, NEGATIVE_RESPONSE_SID,
     NRC_SERVICE_NOT_SUPPORTED, NRC_SUBFUNCTION_NOT_SUPPORTED,
     NRC_INCORRECT_MESSAGE_LENGTH, NRC_CONDITIONS_NOT_CORRECT,
+    NRC_REQUEST_SEQUENCE_ERROR,
     NRC_REQUEST_OUT_OF_RANGE, NRC_SECURITY_ACCESS_DENIED, NRC_INVALID_KEY,
     SESSION_DEFAULT, SESSION_PROGRAMMING, SESSION_EXTENDED,
     DID_VEHICLE_SPEED, frame_to_hex,
@@ -60,13 +61,24 @@ def handle_request(state: ECUState, req: bytes) -> bytes:
             return bytes([NEGATIVE_RESPONSE_SID, sid, NRC_CONDITIONS_NOT_CORRECT])
 
         if subfn == 0x01:
-            seed = random.randint(0, 0xFFFF)
+            # secrets (not random) — even in a simulator, using the
+            # module actually intended for security-relevant values is
+            # the correct habit, and avoids any predictability concern
+            # in the seed.
+            seed = secrets.randbelow(0x10000)
             state.pending_seed = seed
             return bytes([sid + POSITIVE_RESPONSE_OFFSET, 0x01]) + struct.pack(">H", seed)
 
         elif subfn == 0x02:
-            if state.pending_seed is None or len(req) != 4:
-                return bytes([NEGATIVE_RESPONSE_SID, sid, NRC_REQUEST_OUT_OF_RANGE])
+            if len(req) != 4:
+                return bytes([NEGATIVE_RESPONSE_SID, sid, NRC_INCORRECT_MESSAGE_LENGTH])
+            if state.pending_seed is None:
+                # Real UDS distinguishes "wrong length" from "you sent a
+                # key without ever requesting a seed first" — the latter
+                # is a request-SEQUENCE error (0x24), not an out-of-range
+                # value. Precise NRC choice matters: a real diagnostic
+                # tool branches its retry logic differently per NRC.
+                return bytes([NEGATIVE_RESPONSE_SID, sid, NRC_REQUEST_SEQUENCE_ERROR])
             key = struct.unpack(">H", req[2:4])[0]
             expected = compute_expected_key(state.pending_seed)
             state.pending_seed = None
