@@ -1,104 +1,180 @@
 # UDS (ISO 14229) Protocol Simulator
 
-A working diagnostic tester ↔ ECU simulation in Python, implementing
-real UDS request/response framing, session state, and a security
-access seed/key handshake.
+A Python-based diagnostic tester ↔ ECU simulator implementing UDS request/response handling, diagnostic session state, security access, and CAN-based transport using ISO-TP.
 
-## Breaking it down in a simple version:
+The project started with a TCP transport and was extended to a CAN-frame-level transport while keeping the UDS application logic separated from the transport layer.
 
-Imagine your car's ECU is a strict security guard: wrong session, guard
-won't discuss sensitive topics. Right session but no ID shown yet, guard
-lets you look around (read data) but not touch anything (write data,
-run routines). Show a fake ID (wrong key), guard rejects you and says
-exactly why. Show the real ID (key computed correctly from a one-time
-random seed), you're trusted for the rest of the visit.
+## Project overview
 
-## Why the seed/key handshake matters
+The simulator models a diagnostic tester communicating with an ECU.
 
-The seed changes every session, so recording an old successful
-handshake and replaying it later won't work — the old key doesn't
-match the new seed. This project uses a simplified stand-in algorithm;
-real manufacturers use proprietary, much harder-to-reverse math here.
+The ECU behaves like a security-controlled system:
 
-## Files
-(UPDATED)
+* The tester must enter the appropriate diagnostic session before performing protected operations.
+* Read operations can be performed without unlocking security access.
+* Write operations and routine control are security-gated.
+* The ECU generates a fresh random security seed.
+* The tester computes the corresponding key and sends it back.
+* An incorrect key is rejected.
 
-| File | What it does |
+The seed/key mechanism is intentionally simplified for simulation purposes. Production ECUs typically use proprietary or cryptographically stronger algorithms.
+
+## Architecture
+
+The project is structured into separate protocol and transport layers:
+
+```text
+UDS Application Layer
+        │
+        ▼
+ecu_can.py / tester_can.py
+        │
+        ▼
+can_transport.py
+        │
+        ▼
+ISO-TP (ISO 15765-2)
+        │
+        ▼
+python-can Virtual CAN Bus
+```
+
+### Layer responsibilities
+
+| Component | Responsibility |
 |---|---|
-| `iso_tp.py` | Pure ISO-TP framing logic: Single/First/Consecutive/Flow-Control frame encode & decode, no networking |
-| `can_transport.py` | Wraps `python-can`, sends/receives full UDS messages, handling ISO-TP segmentation transparently |
-| `test_can_transport.py` | 4 pure-logic tests + 1 real two-instance CAN bus transfer test |
-| `ecu_can.py` | The UDS ECU simulator, now listening on this CAN transport instead of TCP |
-| `tester_can.py` | The UDS tester client, now sending over this CAN transport instead of TCP |
-| `test_uds_over_can.py` | Full UDS diagnostic session (session control, security access, RDBI/WDBI, routine control, reset) proven end-to-end over CAN |
+| `iso_tp.py`                      | Pure ISO-TP framing, segmentation, reassembly, sequence validation, and Flow Control frame handling |
+| `can_transport.py`               | CAN transport layer built on `python-can`; sends and receives complete UDS payloads over ISO-TP     |
+| `ecu_can.py`                     | ECU-side CAN diagnostic simulator                                                                   |
+| `tester_can.py`                  | Tester-side CAN diagnostic client                                                                   |
+| `test_can_transport.py`          | Unit/regression tests for ISO-TP and CAN transport behavior                                         |
+| `test_uds_over_can.py`           | End-to-end UDS diagnostic session over the CAN transport                                            |
+| `ecu_simulator.py` / `tester.py` | Original UDS application implementation used by the simulator                                       |
+
+A key design property is that the UDS request handling logic is separated from the transport mechanism. The CAN transport was integrated without requiring changes to the core `handle_request()` UDS logic.
 
 ## Services implemented
 
-| SID | Service |
-|---|---|
-| `0x10` | Diagnostic Session Control |
-| `0x11` | ECU Reset |
-| `0x22` | Read Data By Identifier |
-| `0x27` | Security Access (seed/key) |
-| `0x2E` | Write Data By Identifier (security-gated) |
-| `0x31` | Routine Control (security-gated) |
-| `0x3E` | Tester Present |
+| SID    | Service                    | Security         |
+| ------ | -------------------------- | ---------------- |
+| `0x10` | Diagnostic Session Control | —                |
+| `0x11` | ECU Reset                  | —                |
+| `0x22` | Read Data By Identifier    | Read access      |
+| `0x27` | Security Access (seed/key) | Unlock mechanism |
+| `0x2E` | Write Data By Identifier   | Required         |
+| `0x31` | Routine Control            | Required         |
+| `0x3E` | Tester Present             | —                |
 
-## How to run it
+## CAN + ISO-TP Transport Layer
 
-```bash
-python3 test_uds.py
-```
-## Output:
-<img width="675" height="579" alt="Screenshot (40)" src="https://github.com/user-attachments/assets/9f49a44f-9adf-4128-8801-3efe5314b261" />
+The project implements CAN-frame-level transport using ISO-TP (ISO 15765-2).
 
-<img width="634" height="620" alt="Screenshot (41)" src="https://github.com/user-attachments/assets/293abca8-cba8-492c-9b39-b0f6d6bfa2c4" />
+The implementation models Classical CAN data frames with up to 8 bytes of payload. ISO-TP allows larger UDS messages to be segmented across multiple CAN frames and reassembled by the receiver.
 
+### ISO-TP frame types
 
-## What I'd add next
+| Frame                  | Purpose                                                                           |
+| ---------------------- | --------------------------------------------------------------------------------- |
+| Single Frame (SF)      | Carries a complete payload that fits within a single frame                        |
+| First Frame (FF)       | Starts a multi-frame transfer and announces the total payload length              |
+| Consecutive Frame (CF) | Carries the remaining payload and uses sequence numbers to detect ordering errors |
+| Flow Control (FC)      | Receiver response controlling whether the sender continues, waits, or aborts      |
 
-- - ~~Real CAN transport (python-can + vcan0) instead of TCP~~ **Done**, see `iso_tp.py` / `can_transport.py` / `test_can_transport.py` 
-- 0x34/0x36/0x37 (OTA firmware update flow)
-- Interactive CLI for the tester
-- - ~~Wire this into `ecu_simulator.py` / `tester.py`~~ — **Done**, see `ecu_can.py` / `tester_can.py` / `test_uds_over_can.py`. `handle_request()` (the actual UDS logic) needed zero changes.
+For a multi-frame transfer, the receiver sends a Flow Control frame before the sender continues transmitting Consecutive Frames.
 
-# CAN Bus + ISO-TP Transport Layer (ISO 15765-2)
+The implementation also supports Flow Control Block Size and STmin pacing.
 
-An upgrade to the UDS Protocol Simulator: real CAN-frame-level
-transport with ISO-TP segmentation and reassembly, replacing the
-original plain-TCP transport. UDS messages longer than 7 bytes are now
-genuinely split across multiple 8-byte CAN frames and reassembled, including a real, two-directional Flow Control handshake instead of being sent as one arbitrarily-sized chunk over a socket.
-This uses `python-can`'s **virtual** bus backend, not real SocketCAN
-(`vcan0`). Real SocketCAN needs a Linux kernel module and a privileged
-container, which is currently not available. The virtual backend is a real
-`python-can` feature (used in python-can's own test suite) that is the same
-`can.Message` objects, the same API, and the same ISO-TP logic sitting on top of
-it. Switching to real hardware or SocketCAN later is a **updating the code to** (`interface="socketcan", channel="vcan0"` instead of `interface="virtual"`)
+## Virtual CAN backend
 
-## The 4 frame types (ISO 15765-2)
+The transport currently uses `python-can`'s **virtual bus backend**.
 
-| Frame | Purpose |
-|---|---|
-| Single Frame (SF) | Whole message fits in ≤7 bytes: sent as-is |
-| First Frame (FF) | Message too big: announces total length, carries first 6 bytes |
-| Consecutive Frame (CF) | Carries the next 7 bytes, numbered 0-15 (wraps) so dropped or reordered frames are detectable |
-| Flow Control (FC) | Sent by the **receiver** back to the sender: "continue," "wait," or "abort," plus pacing controls |
+This provides an actual `python-can` bus interface and `can.Message` objects without requiring a physical CAN adapter or Linux SocketCAN setup. Two independent `CanUdsTransport` instances communicate through the virtual bus.
 
-## What's verified: 
+This makes the transport layer testable in environments where `vcan0` or physical CAN hardware is unavailable.
 
-- 20-byte message correctly splits into exactly 3 frames (1 FF + 2 CF) and reassembles byte-for-byte
-- An out-of-order Consecutive Frame is correctly detected and rejected
-- A real 25-byte message sent between two independent `CanUdsTransport` instances (genuinely separate objects, communicating only via the virtual CAN bus, not by sharing memory), including the ECU side correctly sending back a real Flow Control frame before the sender continues.
+### Hardware / SocketCAN note
 
-- ## How to run it
+The current implementation is intentionally configured for the `virtual` backend.
+
+Moving to SocketCAN or physical CAN hardware would require environment-specific configuration and testing in addition to changing the `python-can` interface/channel configuration. The protocol and ISO-TP layers are designed to remain independent of that bus backend.
+
+## Transport validation and defensive checks
+
+The CAN/ISO-TP transport includes validation for malformed and invalid protocol states, including:
+
+* Rejecting payloads larger than the supported 12-bit ISO-TP length limit of 4095 bytes.
+* Rejecting empty CAN frames.
+* Rejecting malformed Single Frames whose claimed payload length exceeds the available data.
+* Rejecting First Frames shorter than the required 8-byte CAN frame.
+* Rejecting invalid First Frame payload lengths.
+* Detecting out-of-order Consecutive Frames through sequence-number validation.
+* Rejecting reserved/invalid ISO-TP STmin values.
+* Supporting sub-millisecond STmin values in the `0xF1`–`0xF9` range.
+* Enforcing Flow Control Block Size.
+* Bounding repeated Flow Control `WAIT` frames so a sender cannot wait indefinitely.
+
+These checks are covered by regression tests in `test_can_transport.py`.
+
+## Testing
+
+Run the transport-layer test suite:
 
 ```bash
 pip install python-can
 python3 test_can_transport.py
 ```
-## Output:
-<img width="975" height="460" alt="uds_ps_test_can_transportpy" src="https://github.com/user-attachments/assets/8828c93a-4d48-4576-b20d-297020ac2a26" />
 
-## Wire CAN Transport into ECU Simulator (output):
-<img width="819" height="460" alt="UDS_3RD_UPDATEa" src="https://github.com/user-attachments/assets/6cd36f38-8dd7-41ca-b8f3-fb32006f1a4a" />
-<img width="942" height="527" alt="UDS_3RD_UPDATEb" src="https://github.com/user-attachments/assets/4244004e-c956-4f1e-8b12-cfae971d0c07" />
+The test suite covers:
+
+* Single-frame ISO-TP round-trip
+* Multi-frame segmentation and reassembly
+* Consecutive Frame sequence validation
+* Flow Control frame formatting
+* Two-instance CAN transport communication
+* Flow Control Block Size enforcement
+* ISO-TP payload length limits
+* Malformed frame rejection
+* Malformed First Frame rejection
+* Invalid STmin rejection
+* Bounded repeated Flow Control `WAIT`
+
+Run the end-to-end UDS-over-CAN test:
+
+```bash
+python3 test_uds_over_can.py
+```
+
+This exercises the diagnostic session over the CAN transport, including session control, security access, Read Data By Identifier, Write Data By Identifier, routine control, Tester Present, and ECU reset behavior.
+
+## Test output
+
+### CAN transport tests
+
+<img width="975" height="460" alt="CAN transport test output" src="https://github.com/user-attachments/assets/8828c93a-4d48-4576-b20d-297020ac2a26" />
+
+### UDS over CAN
+
+<img width="819" height="460" alt="UDS over CAN output" src="https://github.com/user-attachments/assets/6cd36f38-8dd7-41ca-b8f3-fb32006f1a4a" />
+
+<img width="942" height="527" alt="UDS over CAN output" src="https://github.com/user-attachments/assets/4244004e-c956-4f1e-8b12-cfae971d0c07" />
+
+## What I'd add next
+
+* `0x34 / 0x36 / 0x37` — UDS Request Download / Transfer Data / Request Transfer Exit for an OTA-style firmware update flow.
+* Interactive diagnostic tester CLI.
+* Additional negative-path and timeout tests.
+* SocketCAN / physical CAN hardware validation.
+
+## Project status
+
+The simulator currently provides:
+
+* UDS diagnostic services
+* Session and security state handling
+* CAN transport using `python-can`
+* ISO-TP segmentation and reassembly
+* Flow Control negotiation
+* Block Size enforcement
+* STmin decoding and pacing
+* Defensive protocol validation
+* End-to-end UDS-over-CAN testing
