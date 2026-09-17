@@ -19,7 +19,10 @@ from tester import UDSTester, UDSError
 
 def test_session_control_valid():
     state = ECUState()
-    resp = handle_request(state, bytes([SID_DIAGNOSTIC_SESSION_CONTROL, SESSION_EXTENDED]))
+    resp = handle_request(
+        state,
+        bytes([SID_DIAGNOSTIC_SESSION_CONTROL, SESSION_EXTENDED])
+    )
     assert resp[0] == SID_DIAGNOSTIC_SESSION_CONTROL + 0x40
     assert state.session == SESSION_EXTENDED
     print("PASS: session control accepts valid session type")
@@ -27,7 +30,10 @@ def test_session_control_valid():
 
 def test_session_control_invalid_subfunction():
     state = ECUState()
-    resp = handle_request(state, bytes([SID_DIAGNOSTIC_SESSION_CONTROL, 0x99]))
+    resp = handle_request(
+        state,
+        bytes([SID_DIAGNOSTIC_SESSION_CONTROL, 0x99])
+    )
     assert resp[0] == NEGATIVE_RESPONSE_SID
     assert resp[2] == NRC_SUBFUNCTION_NOT_SUPPORTED
     print("PASS: session control rejects garbage subfunction")
@@ -36,7 +42,11 @@ def test_session_control_invalid_subfunction():
 def test_write_without_security_denied():
     state = ECUState()
     state.session = SESSION_EXTENDED
-    req = bytes([SID_WRITE_DATA_BY_IDENTIFIER]) + DID_VEHICLE_SPEED.to_bytes(2, "big") + bytes([99])
+    req = (
+        bytes([SID_WRITE_DATA_BY_IDENTIFIER])
+        + DID_VEHICLE_SPEED.to_bytes(2, "big")
+        + bytes([99])
+    )
     resp = handle_request(state, req)
     assert resp[0] == NEGATIVE_RESPONSE_SID
     assert resp[2] == NRC_SECURITY_ACCESS_DENIED
@@ -46,10 +56,17 @@ def test_write_without_security_denied():
 def test_security_access_wrong_key_rejected():
     state = ECUState()
     state.session = SESSION_EXTENDED
-    seed_resp = handle_request(state, bytes([SID_SECURITY_ACCESS, 0x01]))
+    seed_resp = handle_request(
+        state,
+        bytes([SID_SECURITY_ACCESS, 0x01])
+    )
     seed = int.from_bytes(seed_resp[2:4], "big")
     wrong_key = (compute_expected_key(seed) ^ 0xFFFF) & 0xFFFF
-    resp = handle_request(state, bytes([SID_SECURITY_ACCESS, 0x02]) + wrong_key.to_bytes(2, "big"))
+    resp = handle_request(
+        state,
+        bytes([SID_SECURITY_ACCESS, 0x02])
+        + wrong_key.to_bytes(2, "big")
+    )
     assert resp[0] == NEGATIVE_RESPONSE_SID
     assert resp[2] == NRC_INVALID_KEY
     assert state.security_unlocked is False
@@ -59,10 +76,17 @@ def test_security_access_wrong_key_rejected():
 def test_security_access_correct_key_unlocks():
     state = ECUState()
     state.session = SESSION_EXTENDED
-    seed_resp = handle_request(state, bytes([SID_SECURITY_ACCESS, 0x01]))
+    seed_resp = handle_request(
+        state,
+        bytes([SID_SECURITY_ACCESS, 0x01])
+    )
     seed = int.from_bytes(seed_resp[2:4], "big")
     correct_key = compute_expected_key(seed)
-    resp = handle_request(state, bytes([SID_SECURITY_ACCESS, 0x02]) + correct_key.to_bytes(2, "big"))
+    resp = handle_request(
+        state,
+        bytes([SID_SECURITY_ACCESS, 0x02])
+        + correct_key.to_bytes(2, "big")
+    )
     assert resp[0] == SID_SECURITY_ACCESS + 0x40
     assert state.security_unlocked is True
     print("PASS: correct security key unlocks the ECU")
@@ -78,23 +102,37 @@ def test_security_access_key_without_seed_rejected():
     """
     state = ECUState()
     state.session = SESSION_EXTENDED
+
     # Never called subfn 0x01 (request seed) — pending_seed is still None
-    resp = handle_request(state, bytes([SID_SECURITY_ACCESS, 0x02, 0x00, 0x00]))
+    resp = handle_request(
+        state,
+        bytes([SID_SECURITY_ACCESS, 0x02, 0x00, 0x00])
+    )
     assert resp[0] == NEGATIVE_RESPONSE_SID
     assert resp[2] == NRC_REQUEST_SEQUENCE_ERROR
-    print("PASS: sendKey without a prior requestSeed correctly rejected with requestSequenceError")
+    print(
+        "PASS: sendKey without a prior requestSeed correctly rejected "
+        "with requestSequenceError"
+    )
 
 
 def test_read_unsupported_did_out_of_range():
     state = ECUState()
-    resp = handle_request(state, bytes([SID_READ_DATA_BY_IDENTIFIER, 0x99, 0x99]))
+    resp = handle_request(
+        state,
+        bytes([SID_READ_DATA_BY_IDENTIFIER, 0x99, 0x99])
+    )
     assert resp[0] == NEGATIVE_RESPONSE_SID
     assert resp[2] == NRC_REQUEST_OUT_OF_RANGE
     print("PASS: reading an unknown DID correctly rejected")
 
 
 def test_end_to_end_full_session():
-    server_thread = threading.Thread(target=serve, kwargs={"port": 13401}, daemon=True)
+    server_thread = threading.Thread(
+        target=serve,
+        kwargs={"port": 13401},
+        daemon=True
+    )
     server_thread.start()
     time.sleep(0.3)
 

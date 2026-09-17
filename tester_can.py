@@ -26,51 +26,85 @@ class UDSError(Exception):
         self.sid = sid
         self.nrc = nrc
         name = NRC_NAMES.get(nrc, f"unknown(0x{nrc:02X})")
-        super().__init__(f"UDS negative response to SID 0x{sid:02X}: {name} (0x{nrc:02X})")
+        super().__init__(
+            f"UDS negative response to SID 0x{sid:02X}: "
+            f"{name} (0x{nrc:02X})"
+        )
 
 
 class UDSTesterCAN:
     def __init__(self, channel: str = "uds-can-bus"):
-        self.transport = CanUdsTransport(channel, tx_id=DEFAULT_TESTER_ID, rx_id=DEFAULT_ECU_ID)
+        self.transport = CanUdsTransport(
+            channel,
+            tx_id=DEFAULT_TESTER_ID,
+            rx_id=DEFAULT_ECU_ID
+        )
 
     def _transact(self, req: bytes) -> bytes:
         print(f"[Tester-CAN] -> {frame_to_hex(req)}")
         self.transport.send_uds_message(req)
         resp = self.transport.receive_uds_message()
+        if not resp:
+            raise ConnectionError("No response received from ECU")
         print(f"[Tester-CAN] <- {frame_to_hex(resp)}")
         if resp[0] == NEGATIVE_RESPONSE_SID:
+            if len(resp) < 3:
+                raise ValueError(
+                    f"Malformed negative response, too short: "
+                    f"{frame_to_hex(resp)}"
+                )
             raise UDSError(resp[1], resp[2])
+        if resp[0] != req[0] + 0x40:
+            raise ValueError(
+                f"Response SID {resp[0]:#04x} doesn't match request SID "
+                f"{req[0]:#04x} (expected {req[0] + 0x40:#04x})"
+            )
         return resp
 
     def diagnostic_session_control(self, session: int) -> bytes:
-        return self._transact(bytes([SID_DIAGNOSTIC_SESSION_CONTROL, session]))
+        return self._transact(
+            bytes([SID_DIAGNOSTIC_SESSION_CONTROL, session])
+        )
 
     def tester_present(self) -> bytes:
-        return self._transact(bytes([SID_TESTER_PRESENT, 0x00]))
+        return self._transact(
+            bytes([SID_TESTER_PRESENT, 0x00])
+        )
 
     def request_seed(self) -> int:
-        resp = self._transact(bytes([SID_SECURITY_ACCESS, 0x01]))
+        resp = self._transact(
+            bytes([SID_SECURITY_ACCESS, 0x01])
+        )
         return struct.unpack(">H", resp[2:4])[0]
 
     def send_key(self, key: int) -> bytes:
-        return self._transact(bytes([SID_SECURITY_ACCESS, 0x02]) + struct.pack(">H", key))
+        return self._transact(
+            bytes([SID_SECURITY_ACCESS, 0x02]) + struct.pack(">H", key)
+        )
 
     def read_data_by_identifier(self, did: int) -> int:
-        resp = self._transact(bytes([SID_READ_DATA_BY_IDENTIFIER]) + struct.pack(">H", did))
+        resp = self._transact(
+            bytes([SID_READ_DATA_BY_IDENTIFIER]) + struct.pack(">H", did)
+        )
         return resp[3]
 
     def write_data_by_identifier(self, did: int, value: int) -> bytes:
         return self._transact(
-            bytes([SID_WRITE_DATA_BY_IDENTIFIER]) + struct.pack(">H", did) + bytes([value])
+            bytes([SID_WRITE_DATA_BY_IDENTIFIER])
+            + struct.pack(">H", did)
+            + bytes([value])
         )
 
     def routine_control(self, subfn: int, routine_id: int) -> bytes:
         return self._transact(
-            bytes([SID_ROUTINE_CONTROL, subfn]) + struct.pack(">H", routine_id)
+            bytes([SID_ROUTINE_CONTROL, subfn])
+            + struct.pack(">H", routine_id)
         )
 
     def ecu_reset(self, reset_type: int = 0x01) -> bytes:
-        return self._transact(bytes([SID_ECU_RESET, reset_type]))
+        return self._transact(
+            bytes([SID_ECU_RESET, reset_type])
+        )
 
     def close(self):
         self.transport.close()

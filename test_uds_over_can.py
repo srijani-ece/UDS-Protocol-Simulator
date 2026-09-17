@@ -29,12 +29,15 @@ from uds_common import SESSION_EXTENDED, DID_VEHICLE_SPEED, NRC_SECURITY_ACCESS_
 def test_full_session_over_can():
     channel = "test-integration-channel"
 
-    server_thread = threading.Thread(target=serve_can, kwargs={"channel": channel}, daemon=True)
+    server_thread = threading.Thread(
+        target=serve_can,
+        kwargs={"channel": channel},
+        daemon=True
+    )
     server_thread.start()
-    time.sleep(0.3)
+    time.sleep(0.5)   # bumped from 0.3 — still a guess, not a real signal (see note below)
 
     t = UDSTesterCAN(channel=channel)
-
     t.diagnostic_session_control(SESSION_EXTENDED)
 
     original_speed = t.read_data_by_identifier(DID_VEHICLE_SPEED)
@@ -59,8 +62,10 @@ def test_full_session_over_can():
     t.ecu_reset()
 
     t.close()
-    print("PASS: full UDS diagnostic session (session control, security access, "
-          "RDBI/WDBI, routine control, reset) completed correctly over real CAN + ISO-TP transport")
+    print(
+        "PASS: full UDS diagnostic session (session control, security access, "
+        "RDBI/WDBI, routine control, reset) completed correctly over real CAN + ISO-TP transport"
+    )
 
 
 if __name__ == "__main__":

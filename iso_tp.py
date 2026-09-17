@@ -41,7 +41,7 @@ FRAME_TYPE_CF = 0x2  # Consecutive Frame
 FRAME_TYPE_FC = 0x3  # Flow Control
 
 FC_CONTINUE = 0x0   # "send more"
-FC_WAIT     = 0x1   # "pause, don't send yet"
+FC_WAIT = 0x1       # "pause, don't send yet"
 FC_OVERFLOW = 0x2   # "abort, I can't accept this message"
 
 
@@ -85,6 +85,7 @@ def build_frames(payload: bytes) -> list[bytes]:
 
     remaining = payload[6:]
     seq = 1
+
     while remaining:
         chunk = remaining[:7]
         remaining = remaining[7:]
@@ -95,9 +96,11 @@ def build_frames(payload: bytes) -> list[bytes]:
     return frames
 
 
-def build_flow_control_frame(flow_status: int = FC_CONTINUE,
-                              block_size: int = 0,
-                              st_min: int = 0) -> bytes:
+def build_flow_control_frame(
+    flow_status: int = FC_CONTINUE,
+    block_size: int = 0,
+    st_min: int = 0,
+) -> bytes:
     """
     Builds the receiver's "go ahead" response.
     block_size: how many Consecutive Frames to send before waiting for
@@ -105,7 +108,11 @@ def build_flow_control_frame(flow_status: int = FC_CONTINUE,
     st_min:     minimum gap (ms) the sender must wait between Consecutive
                 Frames — lets a slow receiver control the pace
     """
-    frame = bytes([FRAME_TYPE_FC << 4 | flow_status, block_size, st_min])
+    frame = bytes([
+        FRAME_TYPE_FC << 4 | flow_status,
+        block_size,
+        st_min,
+    ])
     return frame.ljust(8, b'\x00')
 
 
@@ -123,8 +130,22 @@ class IsoTpReceiver:
     _receiving: bool = False
 
     def receive_frame(self, frame: bytes) -> bytes | None:
+        try:
+            return self._receive_frame_inner(frame)
+        except ValueError:
+            # Any protocol error aborts whatever reassembly was in
+            # progress. Otherwise a caller that catches the error and
+            # keeps feeding frames would corrupt the next message by
+            # reassembling into stale leftover state.
+            self._receiving = False
+            self._buffer = bytearray()
+            self._next_seq = 1
+            raise
+
+    def _receive_frame_inner(self, frame: bytes) -> bytes | None:
         if not frame:
             raise ValueError("Empty CAN frame passed to ISO-TP receiver")
+
         if len(frame) < 2:
             raise ValueError(
                 f"Malformed ISO-TP frame: only {len(frame)} byte(s), "
@@ -135,11 +156,16 @@ class IsoTpReceiver:
 
         if frame_type == FRAME_TYPE_SF:
             length = frame[0] & 0x0F
+
+            if length == 0:
+                raise ValueError("Malformed Single Frame: length field is 0")
+
             if length > len(frame) - 1:
                 raise ValueError(
                     f"Malformed Single Frame: claims {length} bytes of "
                     f"payload but only {len(frame) - 1} bytes present"
                 )
+
             return bytes(frame[1:1 + length])
 
         elif frame_type == FRAME_TYPE_FF:
@@ -150,12 +176,14 @@ class IsoTpReceiver:
 
             self._expected_length = ((frame[0] & 0x0F) << 8) | frame[1]
 
-            if self._expected_length < 7:
+            if self._expected_length < 8:
                 raise ValueError(
                     f"Malformed First Frame: invalid payload length "
                     f"{self._expected_length}"
                 )
 
+            # A new First Frame always starts a fresh reassembly, even
+            # if one was already in progress (that old one is abandoned).
             self._buffer = bytearray(frame[2:8])
             self._next_seq = 1
             self._receiving = True
@@ -163,13 +191,18 @@ class IsoTpReceiver:
 
         elif frame_type == FRAME_TYPE_CF:
             if not self._receiving:
-                raise ValueError("Consecutive Frame received with no First Frame in progress")
+                raise ValueError(
+                    "Consecutive Frame received with no First Frame in progress"
+                )
+
             seq = frame[0] & 0x0F
+
             if seq != self._next_seq:
                 raise ValueError(
                     f"ISO-TP sequence error: expected CF #{self._next_seq}, got #{seq} "
                     f"(a frame was lost or arrived out of order)"
                 )
+
             remaining_needed = self._expected_length - len(self._buffer)
             self._buffer += frame[1:1 + min(7, remaining_needed)]
             self._next_seq = (self._next_seq + 1) & 0x0F
@@ -178,12 +211,14 @@ class IsoTpReceiver:
                 complete = bytes(self._buffer[:self._expected_length])
                 self._receiving = False
                 return complete
+
             return None
 
         elif frame_type == FRAME_TYPE_FC:
-            raise ValueError("Flow Control frame passed to IsoTpReceiver — "
-                              "this belongs to the SENDER side, not the receiver")
+            raise ValueError(
+                "Flow Control frame passed to IsoTpReceiver — "
+                "this belongs to the SENDER side, not the receiver"
+            )
 
         else:
             raise ValueError(f"Unknown ISO-TP frame type: {frame_type:#x}")
-            

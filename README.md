@@ -147,15 +147,6 @@ python3 test_uds_over_can.py
 This exercises the diagnostic session over the CAN transport, including session control, security access, Read Data By Identifier, Write Data By Identifier, routine control, Tester Present, and ECU reset behavior.
 
 ## Test output
-
-### CAN transport tests
-
-<img width="819" height="460" alt="UDSCLEAN1" src="https://github.com/user-attachments/assets/3469cdb3-b4b9-4f0b-ae9e-1895b610b2da" />
-
-### UDS over CAN
-<img width="819" height="488" alt="UDSCLEAN2" src="https://github.com/user-attachments/assets/09898a28-8c92-4245-8f45-555cf97efb5f" />
-<img width="819" height="460" alt="UDSCLEAN3" src="https://github.com/user-attachments/assets/50518f2b-afdc-44b1-9909-f6c5cb1090be" />
-
 ## What I'd add next
 
 * `0x34 / 0x36 / 0x37` — UDS Request Download / Transfer Data / Request Transfer Exit for an OTA-style firmware update flow.
